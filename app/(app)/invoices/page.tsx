@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { formatINR } from "@/lib/accounting/money";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenant } from "@/lib/tenant";
+import { InvoiceRowActions } from "@/components/invoices/invoice-row-actions";
 
 export default async function InvoicesPage() {
   const supabase = await createClient();
@@ -43,12 +44,13 @@ export default async function InvoicesPage() {
                 <th className="text-right">Amount</th>
                 <th className="text-right">Balance</th>
                 <th className="text-right">Status</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
               {(!invoices || invoices.length === 0) && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-ink-400">
+                  <td colSpan={9} className="py-10 text-center text-ink-400">
                     No invoices yet.{" "}
                     <Link href="/invoices/new" className="text-info-600 hover:underline">
                       Create your first invoice
@@ -73,6 +75,9 @@ export default async function InvoicesPage() {
                   </td>
                   <td className="text-right">
                     <StatusBadge status={inv.status} />
+                  </td>
+                  <td className="text-right">
+                    <InvoiceRowActions invoiceId={inv.id} status={inv.status} />
                   </td>
                 </tr>
               ))}

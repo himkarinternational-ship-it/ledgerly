@@ -9,8 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GST_STATE_CODES } from "@/lib/gst/calculator";
 import { previewInvoiceTotals } from "@/lib/gst/preview";
 import { formatINR } from "@/lib/accounting/money";
-import { finalizeAndRedirect } from "@/app/(app)/invoices/actions";
+import { finalizeAndRedirect, updateAndRedirect } from "@/app/(app)/invoices/actions";
 import { cn } from "@/lib/utils/cn";
+import { TDS_SECTION_LIST } from "@/lib/gst/tds";
 
 interface ClientOption {
   id: string;
@@ -18,6 +19,13 @@ interface ClientOption {
   gstin: string | null;
   billing_state: string | null;
   billing_state_code: string | null;
+}
+
+interface BankAccountOption {
+  id: string;
+  bank_name: string;
+  account_number: string;
+  is_primary: boolean;
 }
 
 interface LineItemRow {
@@ -40,26 +48,61 @@ const emptyLine: LineItemRow = {
   gstRate: 18,
 };
 
+interface ExistingInvoiceData {
+  id: string;
+  invoiceType: "tax_invoice" | "bill_of_supply" | "export" | "proforma";
+  clientId: string;
+  issueDate: string;
+  dueDate: string;
+  placeOfSupplyStateCode: string;
+  notes: string;
+  bankAccountId: string;
+  tdsApplicable: boolean;
+  tdsSection: string;
+  lineItems: LineItemRow[];
+}
+
 export function InvoiceForm({
   tenantId,
   supplierStateCode,
   clients,
+  bankAccounts,
+  existingInvoice,
 }: {
   tenantId: string;
   supplierStateCode: string | null;
   clients: ClientOption[];
+  bankAccounts: BankAccountOption[];
+  existingInvoice?: ExistingInvoiceData;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [invoiceType, setInvoiceType] = useState<"tax_invoice" | "bill_of_supply" | "export" | "proforma">("tax_invoice");
-  const [clientId, setClientId] = useState("");
-  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [dueDate, setDueDate] = useState("");
-  const [placeOfSupplyStateCode, setPlaceOfSupplyStateCode] = useState("");
-  const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<LineItemRow[]>([{ ...emptyLine }]);
+  const isEditMode = Boolean(existingInvoice);
+
+  const [invoiceType, setInvoiceType] = useState<"tax_invoice" | "bill_of_supply" | "export" | "proforma">(
+    existingInvoice?.invoiceType ?? "tax_invoice"
+  );
+  const [clientId, setClientId] = useState(existingInvoice?.clientId ?? "");
+  const [issueDate, setIssueDate] = useState(
+    () => existingInvoice?.issueDate ?? new Date().toISOString().slice(0, 10)
+  );
+  const [dueDate, setDueDate] = useState(existingInvoice?.dueDate ?? "");
+  const [placeOfSupplyStateCode, setPlaceOfSupplyStateCode] = useState(
+    existingInvoice?.placeOfSupplyStateCode ?? ""
+  );
+  const [notes, setNotes] = useState(existingInvoice?.notes ?? "");
+  const [bankAccountId, setBankAccountId] = useState(
+    () => existingInvoice?.bankAccountId ?? bankAccounts.find((b) => b.is_primary)?.id ?? bankAccounts[0]?.id ?? ""
+  );
+  const [tdsApplicable, setTdsApplicable] = useState(existingInvoice?.tdsApplicable ?? false);
+  const [tdsSection, setTdsSection] = useState(existingInvoice?.tdsSection ?? "");
+  const [lines, setLines] = useState<LineItemRow[]>(
+    existingInvoice?.lineItems && existingInvoice.lineItems.length > 0
+      ? existingInvoice.lineItems
+      : [{ ...emptyLine }]
+  );
 
   const selectedClient = clients.find((c) => c.id === clientId);
 
@@ -77,6 +120,10 @@ export function InvoiceForm({
   }, [invoiceType, supplierStateCode, placeOfSupplyStateCode]);
 
   const totals = useMemo(() => previewInvoiceTotals(lines, supplyType), [lines, supplyType]);
+
+  const tdsRate = tdsApplicable && tdsSection ? TDS_SECTION_LIST.find((s) => s.code === tdsSection)?.rate ?? 0 : 0;
+  const tdsAmount = tdsApplicable ? Math.round((totals.taxableValue * tdsRate) / 100 * 100) / 100 : 0;
+  const netReceivable = totals.total - tdsAmount;
 
   function updateLine(idx: number, patch: Partial<LineItemRow>) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -106,7 +153,7 @@ export function InvoiceForm({
     }
 
     startTransition(async () => {
-      const result = await finalizeAndRedirect({
+      const payload = {
         tenantId,
         invoiceType,
         clientId,
@@ -115,6 +162,9 @@ export function InvoiceForm({
         placeOfSupplyState: GST_STATE_CODES[placeOfSupplyStateCode] ?? "",
         placeOfSupplyStateCode,
         notes: notes || undefined,
+        bankAccountId: bankAccountId || undefined,
+        tdsApplicable,
+        tdsSection: tdsApplicable ? tdsSection || undefined : undefined,
         lineItems: lines.map((l) => ({
           description: l.description,
           hsnSacCode: l.hsnSacCode || undefined,
@@ -125,7 +175,12 @@ export function InvoiceForm({
           gstRate: l.gstRate,
         })),
         status,
-      });
+      };
+
+      const result = isEditMode
+        ? await updateAndRedirect(existingInvoice!.id, payload)
+        : await finalizeAndRedirect(payload);
+
       if (result?.error) {
         setError(result.error);
       }
@@ -286,6 +341,58 @@ export function InvoiceForm({
           </CardContent>
         </Card>
 
+        {bankAccounts.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Payment Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Label htmlFor="bankAccount">Bank Account to Show on Invoice</Label>
+              <Select id="bankAccount" value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
+                <option value="">Don&apos;t show bank details</option>
+                {bankAccounts.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.bank_name} — ****{b.account_number.slice(-4)}
+                  </option>
+                ))}
+              </Select>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>TDS</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <label className="flex items-center gap-2 text-sm text-ink-600">
+              <input
+                type="checkbox"
+                checked={tdsApplicable}
+                onChange={(e) => setTdsApplicable(e.target.checked)}
+                className="rounded border-rule-strong"
+              />
+              Client will deduct TDS before paying this invoice
+            </label>
+            {tdsApplicable && (
+              <div>
+                <Label htmlFor="tdsSection">TDS Section</Label>
+                <Select id="tdsSection" value={tdsSection} onChange={(e) => setTdsSection(e.target.value)}>
+                  <option value="">Select section…</option>
+                  {TDS_SECTION_LIST.map((s) => (
+                    <option key={s.code} value={s.code}>
+                      {s.label} ({s.rate}%)
+                    </option>
+                  ))}
+                </Select>
+                <p className="mt-1 text-[11px] text-ink-400">
+                  TDS is calculated on the taxable value (excluding GST), per standard practice.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Notes</CardTitle>
@@ -315,8 +422,16 @@ export function InvoiceForm({
             )}
             {totals.roundOff !== 0 && <SummaryRow label="Round Off" value={totals.roundOff} muted />}
             <div className="border-t border-rule pt-2">
-              <SummaryRow label="Total" value={totals.total} bold />
+              <SummaryRow label="Total (Invoice Amount)" value={totals.total} bold />
             </div>
+            {tdsApplicable && tdsAmount > 0 && (
+              <>
+                <SummaryRow label={`TDS (${tdsSection || "—"} @ ${tdsRate}%)`} value={-tdsAmount} muted />
+                <div className="border-t border-rule pt-2">
+                  <SummaryRow label="Net Receivable" value={netReceivable} bold />
+                </div>
+              </>
+            )}
 
             {error && (
               <p className="rounded-[var(--radius-md)] bg-negative-100 px-3 py-2 text-xs text-negative-700">{error}</p>
@@ -324,10 +439,10 @@ export function InvoiceForm({
 
             <div className="flex flex-col gap-2 pt-3">
               <Button onClick={() => handleSubmit("sent")} disabled={isPending}>
-                {isPending ? "Saving…" : "Save & Finalize"}
+                {isPending ? "Saving…" : isEditMode ? "Finalize Invoice" : "Save & Finalize"}
               </Button>
               <Button variant="outline" onClick={() => handleSubmit("draft")} disabled={isPending}>
-                Save as Draft
+                {isEditMode ? "Save Draft" : "Save as Draft"}
               </Button>
               <Button variant="ghost" type="button" onClick={() => router.back()} disabled={isPending}>
                 Cancel

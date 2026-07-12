@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { idSchema } from "@/lib/utils/validation";
 import { createClient } from "@/lib/supabase/server";
 import { calculateInvoiceTotals, determineSupplyType, calculateLineItemGst } from "@/lib/gst/calculator";
 import { postInvoiceToJournal } from "@/lib/accounting/postInvoice";
 import { getCurrentTenant } from "@/lib/tenant";
+import { idSchema } from "@/lib/utils/validation";
+import { TDS_SECTIONS } from "@/lib/gst/tds";
+import { money, round2 } from "@/lib/accounting/money";
 
 const lineItemSchema = z.object({
   description: z.string().min(1),
@@ -29,6 +31,9 @@ const invoiceSchema = z.object({
   placeOfSupplyStateCode: z.string(),
   notes: z.string().optional(),
   paymentTerms: z.string().optional(),
+  bankAccountId: idSchema.optional(),
+  tdsApplicable: z.coerce.boolean().default(false),
+  tdsSection: z.string().optional(),
   lineItems: z.array(lineItemSchema).min(1),
   status: z.enum(["draft", "sent"]).default("draft"),
 });
@@ -68,6 +73,11 @@ export async function createInvoice(payload: InvoiceFormPayload) {
 
   const invoiceNumber = await generateInvoiceNumber(supabase, tenant.id, data.invoiceType);
 
+  // TDS is computed on the taxable value (fee/goods value), excluding GST —
+  // this matches standard practice under CBDT Circular 23/2017.
+  const tdsRate = data.tdsApplicable && data.tdsSection ? TDS_SECTIONS[data.tdsSection]?.rate ?? 0 : 0;
+  const tdsAmount = data.tdsApplicable ? round2(money(totals.taxableValue).times(tdsRate).dividedBy(100)) : 0;
+
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
     .insert({
@@ -91,6 +101,11 @@ export async function createInvoice(payload: InvoiceFormPayload) {
       status: data.status,
       notes: data.notes || null,
       payment_terms: data.paymentTerms || null,
+      bank_account_id: data.bankAccountId || null,
+      tds_applicable: data.tdsApplicable,
+      tds_section: data.tdsSection || null,
+      tds_rate: tdsRate,
+      tds_amount: tdsAmount,
     })
     .select()
     .single();
@@ -163,3 +178,217 @@ export async function finalizeAndRedirect(payload: InvoiceFormPayload) {
   return result;
 }
 
+/**
+ * Deletes a draft invoice outright. Only allowed for drafts, since a
+ * finalized invoice has already posted a journal entry — deleting it would
+ * leave that entry orphaned and silently corrupt the books. Finalized
+ * invoices must go through cancelInvoice instead.
+ */
+export async function deleteInvoice(invoiceId: string) {
+  const supabase = await createClient();
+  const tenant = await getCurrentTenant();
+
+  const { data: invoice, error: fetchErr } = await supabase
+    .from("invoices")
+    .select("id, status, tenant_id")
+    .eq("id", invoiceId)
+    .eq("tenant_id", tenant.id)
+    .single();
+
+  if (fetchErr || !invoice) return { error: "Invoice not found." };
+  if (invoice.status !== "draft") {
+    return { error: "Only draft invoices can be deleted. Finalized invoices must be cancelled instead." };
+  }
+
+  const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/invoices");
+  revalidatePath("/dashboard");
+  return { success: true };
+}
+
+/**
+ * Cancels a finalized invoice: reverses its journal entry (posts an
+ * equal-and-opposite entry rather than deleting the original — audit
+ * trail integrity) and marks the invoice as cancelled. The original
+ * invoice record and its now-reversed journal entry both remain visible
+ * in the Journal for anyone reviewing the books later.
+ */
+export async function cancelInvoice(invoiceId: string) {
+  const supabase = await createClient();
+  const tenant = await getCurrentTenant();
+
+  const { data: invoice, error: fetchErr } = await supabase
+    .from("invoices")
+    .select("id, status, journal_entry_id, invoice_number")
+    .eq("id", invoiceId)
+    .eq("tenant_id", tenant.id)
+    .single();
+
+  if (fetchErr || !invoice) return { error: "Invoice not found." };
+  if (invoice.status === "cancelled") return { error: "Invoice is already cancelled." };
+  if (invoice.status === "draft") {
+    return { error: "This is a draft — use Delete instead of Cancel." };
+  }
+
+  if (invoice.journal_entry_id) {
+    const { reverseJournalEntry } = await import("@/lib/accounting/journal");
+    try {
+      await reverseJournalEntry(
+        supabase,
+        tenant.id,
+        invoice.journal_entry_id,
+        `Invoice ${invoice.invoice_number} cancelled`
+      );
+    } catch (e) {
+      return { error: `Failed to reverse ledger entry: ${(e as Error).message}` };
+    }
+  }
+
+  const { error } = await supabase
+    .from("invoices")
+    .update({ status: "cancelled" })
+    .eq("id", invoiceId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/invoices");
+  revalidatePath("/journal");
+  revalidatePath("/dashboard");
+  revalidatePath(`/invoices/${invoiceId}`);
+  return { success: true };
+}
+
+/**
+ * Updates a draft invoice's contents in place. Only allowed while the
+ * invoice is still a draft. If the edit also finalizes it (status moves
+ * to "sent"), this posts the journal entry — same as createInvoice does
+ * for a brand-new finalized invoice.
+ */
+export async function updateInvoice(invoiceId: string, payload: InvoiceFormPayload) {
+  const parsed = invoiceSchema.safeParse(payload);
+  if (!parsed.success) {
+    return { error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+  const data = parsed.data;
+
+  const supabase = await createClient();
+  const tenant = await getCurrentTenant();
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from("invoices")
+    .select("id, status, tenant_id")
+    .eq("id", invoiceId)
+    .eq("tenant_id", tenant.id)
+    .single();
+
+  if (fetchErr || !existing) return { error: "Invoice not found." };
+  if (existing.status !== "draft") {
+    return { error: "Only draft invoices can be edited. Finalized invoices must be cancelled and re-created instead." };
+  }
+
+  const { data: tenantRow } = await supabase
+    .from("tenants")
+    .select("state_code")
+    .eq("id", tenant.id)
+    .single();
+
+  const supplyType =
+    data.invoiceType === "export"
+      ? "export"
+      : determineSupplyType(tenantRow?.state_code, data.placeOfSupplyStateCode);
+
+  const totals = calculateInvoiceTotals(
+    data.lineItems.map((li) => ({
+      quantity: li.quantity,
+      rate: li.rate,
+      discountPercent: li.discountPercent,
+      gstRate: li.gstRate,
+    })),
+    supplyType
+  );
+
+  const tdsRate = data.tdsApplicable && data.tdsSection ? TDS_SECTIONS[data.tdsSection]?.rate ?? 0 : 0;
+  const tdsAmount = data.tdsApplicable ? round2(money(totals.taxableValue).times(tdsRate).dividedBy(100)) : 0;
+
+  const { error: updateErr } = await supabase
+    .from("invoices")
+    .update({
+      invoice_type: data.invoiceType,
+      client_id: data.clientId,
+      issue_date: data.issueDate,
+      due_date: data.dueDate || null,
+      place_of_supply_state: data.placeOfSupplyState,
+      place_of_supply_state_code: data.placeOfSupplyStateCode,
+      supply_type: supplyType,
+      subtotal: totals.subtotal,
+      discount_total: totals.discountTotal,
+      taxable_value: totals.taxableValue,
+      cgst_amount: totals.cgstAmount,
+      sgst_amount: totals.sgstAmount,
+      igst_amount: totals.igstAmount,
+      round_off: totals.roundOff,
+      total_amount: totals.totalAmount,
+      status: data.status,
+      notes: data.notes || null,
+      payment_terms: data.paymentTerms || null,
+      bank_account_id: data.bankAccountId || null,
+      tds_applicable: data.tdsApplicable,
+      tds_section: data.tdsSection || null,
+      tds_rate: tdsRate,
+      tds_amount: tdsAmount,
+    })
+    .eq("id", invoiceId);
+
+  if (updateErr) return { error: updateErr.message };
+
+  // Replace line items wholesale rather than diffing — simpler and safe
+  // since drafts have no journal entries depending on the old item rows.
+  const { error: deleteItemsErr } = await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId);
+  if (deleteItemsErr) return { error: deleteItemsErr.message };
+
+  const itemRows = data.lineItems.map((li, idx) => {
+    const lineResult = calculateLineItemGst(li, supplyType);
+    return {
+      invoice_id: invoiceId,
+      description: li.description,
+      hsn_sac_code: li.hsnSacCode || null,
+      quantity: li.quantity,
+      unit: li.unit || "unit",
+      rate: li.rate,
+      discount_percent: li.discountPercent,
+      discount_amount: (li.quantity * li.rate * li.discountPercent) / 100,
+      taxable_value: lineResult.taxableValue,
+      gst_rate: li.gstRate,
+      cgst_amount: lineResult.cgstAmount,
+      sgst_amount: lineResult.sgstAmount,
+      igst_amount: lineResult.igstAmount,
+      total_amount: lineResult.totalAmount,
+      sort_order: idx,
+    };
+  });
+
+  const { error: itemsErr } = await supabase.from("invoice_items").insert(itemRows);
+  if (itemsErr) return { error: itemsErr.message };
+
+  if (data.status !== "draft") {
+    try {
+      await postInvoiceToJournal(supabase, tenant.id, invoiceId);
+    } catch (e) {
+      return { error: `Invoice saved, but ledger posting failed: ${(e as Error).message}` };
+    }
+  }
+
+  revalidatePath("/invoices");
+  revalidatePath("/dashboard");
+  revalidatePath(`/invoices/${invoiceId}`);
+  return { success: true, invoiceId };
+}
+
+export async function updateAndRedirect(invoiceId: string, payload: InvoiceFormPayload) {
+  const result = await updateInvoice(invoiceId, payload);
+  if (result.success) {
+    redirect(`/invoices/${invoiceId}`);
+  }
+  return result;
+}

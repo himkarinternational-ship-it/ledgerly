@@ -1,8 +1,9 @@
 import { type NextRequest } from "next/server";
-import { updateSession } from "@/lib/supabase/middleware";
 
 export async function middleware(request: NextRequest) {
-  return await updateSession(request);
+  // Defer Supabase client creation to runtime by using dynamic import
+  const { updateSession } = await import("@/lib/supabase/middleware");
+  return updateSession(request);
 }
 
 export const config = {

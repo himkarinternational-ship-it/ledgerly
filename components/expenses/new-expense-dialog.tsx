@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { createExpense } from "@/app/(app)/expenses/actions";
+import { TDS_SECTION_LIST } from "@/lib/gst/tds";
 
 interface AccountOption {
   id: string;
@@ -15,15 +16,6 @@ interface VendorOption {
   id: string;
   name: string;
 }
-
-const TDS_SECTIONS = [
-  { code: "194C", label: "194C — Contractor payment (1%/2%)" },
-  { code: "194H", label: "194H — Commission/brokerage (5%)" },
-  { code: "194I", label: "194I — Rent (10%)" },
-  { code: "194J", label: "194J — Professional/technical fees (10%)" },
-  { code: "194Q", label: "194Q — Purchase of goods (0.1%)" },
-  { code: "194R", label: "194R — Benefits/perquisites (10%)" },
-];
 
 export function NewExpenseButton({
   expenseAccounts,
@@ -166,9 +158,9 @@ export function NewExpenseButton({
                   <div className="mt-2">
                     <Select id="tdsSection" name="tdsSection" required>
                       <option value="">Select section…</option>
-                      {TDS_SECTIONS.map((s) => (
+                      {TDS_SECTION_LIST.map((s) => (
                         <option key={s.code} value={s.code}>
-                          {s.label}
+                          {s.label} ({s.rate}%)
                         </option>
                       ))}
                     </Select>

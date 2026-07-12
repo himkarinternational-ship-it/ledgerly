@@ -2,20 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { idSchema } from "@/lib/utils/validation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenant } from "@/lib/tenant";
 import { postExpenseToJournal } from "@/lib/accounting/postInvoice";
 import { money, round2 } from "@/lib/accounting/money";
-
-const TDS_SECTIONS: Record<string, number> = {
-  "194C": 1,
-  "194H": 5,
-  "194I": 10,
-  "194J": 10,
-  "194Q": 0.1,
-  "194R": 10,
-};
+import { idSchema } from "@/lib/utils/validation";
+import { TDS_SECTIONS } from "@/lib/gst/tds";
 
 const expenseSchema = z.object({
   vendorId: idSchema.optional(),
@@ -58,7 +50,7 @@ export async function createExpense(payload: z.infer<typeof expenseSchema>) {
     }
   }
 
-  const tdsRate = data.tdsApplicable && data.tdsSection ? TDS_SECTIONS[data.tdsSection] ?? 0 : 0;
+  const tdsRate = data.tdsApplicable && data.tdsSection ? TDS_SECTIONS[data.tdsSection]?.rate ?? 0 : 0;
   const tdsAmount = data.tdsApplicable ? round2(money(taxableValue).times(tdsRate).dividedBy(100)) : 0;
 
   const { data: expense, error } = await supabase
@@ -101,4 +93,3 @@ export async function createExpense(payload: z.infer<typeof expenseSchema>) {
   revalidatePath("/dashboard");
   return { success: true };
 }
-

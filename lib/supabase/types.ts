@@ -40,6 +40,7 @@ export interface Tenant {
   financial_year_start_month: number;
   base_currency: string;
   logo_url: string | null;
+  signature_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -148,6 +149,10 @@ export interface Invoice {
   terms_and_conditions: string | null;
   bank_account_id: string | null;
   linked_invoice_id: string | null;
+  tds_applicable: boolean;
+  tds_section: string | null;
+  tds_rate: number;
+  tds_amount: number;
   journal_entry_id: string | null;
   created_by: string | null;
   created_at: string;

@@ -1,17 +1,20 @@
+import Image from "next/image";
 import { formatINR } from "@/lib/accounting/money";
-import type { Invoice, InvoiceItem, Contact, Tenant } from "@/lib/supabase/types";
+import type { Invoice, InvoiceItem, Contact, Tenant, BankAccount } from "@/lib/supabase/types";
 
 export function InvoicePrintView({
   invoice,
   client,
   items,
   tenant,
+  bankAccount,
   amountInWords,
 }: {
   invoice: Invoice;
   client: Contact | null;
   items: InvoiceItem[];
   tenant: Tenant | null;
+  bankAccount: BankAccount | null;
   amountInWords: string;
 }) {
   const isIntraState = invoice.cgst_amount > 0 || invoice.sgst_amount > 0;
@@ -21,6 +24,7 @@ export function InvoicePrintView({
       <div className="flex items-start justify-between border-b border-rule pb-6">
         <div>
           <h2 className="font-display text-2xl font-semibold text-ink-900">{tenant?.name ?? "—"}</h2>
+          {tenant?.pan && <p className="mt-1 text-xs font-medium text-ink-600">PAN: {tenant.pan}</p>}
           <p className="mt-1 text-xs text-ink-500">
             {tenant?.address_line1}
             {tenant?.city ? `, ${tenant.city}` : ""}
@@ -29,6 +33,18 @@ export function InvoicePrintView({
           {tenant?.gstin && <p className="mt-0.5 text-xs text-ink-500">GSTIN: {tenant.gstin}</p>}
         </div>
         <div className="text-right">
+          {tenant?.logo_url && (
+            <div className="mb-2 flex justify-end">
+              <Image
+                src={tenant.logo_url}
+                alt={`${tenant.name} logo`}
+                width={140}
+                height={64}
+                className="max-h-16 w-auto object-contain"
+                unoptimized
+              />
+            </div>
+          )}
           <p className="font-display text-lg font-medium uppercase tracking-wide text-ink-700">
             {invoice.invoice_type.replace(/_/g, " ")}
           </p>
@@ -44,8 +60,10 @@ export function InvoicePrintView({
             {client?.billing_address_line1}
             {client?.billing_city ? `, ${client.billing_city}` : ""}
             {client?.billing_state ? `, ${client.billing_state}` : ""}
+            {client?.billing_pincode ? `, ${client.billing_pincode}` : ""}
           </p>
           {client?.gstin && <p className="text-xs text-ink-500">GSTIN: {client.gstin}</p>}
+          {!client?.gstin && client?.pan && <p className="text-xs text-ink-500">PAN: {client.pan}</p>}
         </div>
         <div className="text-right">
           <div className="grid grid-cols-2 gap-x-3 text-xs">
@@ -106,6 +124,20 @@ export function InvoicePrintView({
             <span>Total</span>
             <span className="font-mono tabular">{formatINR(invoice.total_amount)}</span>
           </div>
+          {invoice.tds_applicable && invoice.tds_amount > 0 && (
+            <>
+              <div className="flex justify-between text-xs text-ink-500">
+                <span>
+                  TDS {invoice.tds_section ? `@ ${invoice.tds_rate}% ${invoice.tds_section}` : ""}
+                </span>
+                <span className="font-mono tabular">-{formatINR(invoice.tds_amount)}</span>
+              </div>
+              <div className="flex justify-between border-t border-rule pt-1.5 font-semibold text-ink-900">
+                <span>Net Receivable</span>
+                <span className="font-mono tabular">{formatINR(invoice.total_amount - invoice.tds_amount)}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -117,6 +149,49 @@ export function InvoicePrintView({
           <p className="mt-1 text-sm text-ink-600">{invoice.notes}</p>
         </div>
       )}
+
+      <div className="mt-8 grid grid-cols-2 items-end gap-6 border-t border-rule pt-6">
+        <div>
+          {bankAccount && (
+            <>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-400">Bank Details</p>
+              <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+                <dt className="text-ink-400">Bank</dt>
+                <dd className="font-medium text-ink-700">{bankAccount.bank_name}</dd>
+                <dt className="text-ink-400">Account #</dt>
+                <dd className="font-mono tabular text-ink-700">{bankAccount.account_number}</dd>
+                <dt className="text-ink-400">IFSC Code</dt>
+                <dd className="font-mono tabular text-ink-700">{bankAccount.ifsc_code}</dd>
+                {bankAccount.branch && (
+                  <>
+                    <dt className="text-ink-400">Branch</dt>
+                    <dd className="text-ink-700">{bankAccount.branch}</dd>
+                  </>
+                )}
+              </dl>
+            </>
+          )}
+        </div>
+
+        <div className="text-right">
+          <p className="text-xs text-ink-500">For {tenant?.name ?? "—"}</p>
+          {tenant?.signature_url ? (
+            <div className="my-2 flex justify-end">
+              <Image
+                src={tenant.signature_url}
+                alt="Authorized signature"
+                width={140}
+                height={56}
+                className="max-h-14 w-auto object-contain"
+                unoptimized
+              />
+            </div>
+          ) : (
+            <div className="my-6" />
+          )}
+          <p className="border-t border-rule pt-1 text-xs text-ink-500">Authorized Signatory</p>
+        </div>
+      </div>
 
       <p className="mt-8 text-center text-[11px] text-ink-300">This is a computer-generated invoice.</p>
     </div>

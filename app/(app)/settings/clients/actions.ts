@@ -16,6 +16,7 @@ const contactSchema = z.object({
   billingAddressLine1: z.string().optional(),
   billingCity: z.string().optional(),
   billingStateCode: z.string().optional(),
+  billingPincode: z.string().optional(),
   paymentTermsDays: z.coerce.number().default(30),
 });
 
@@ -46,6 +47,7 @@ export async function createContact(payload: z.infer<typeof contactSchema>) {
     billing_city: data.billingCity || null,
     billing_state_code: stateCode || null,
     billing_state: stateCode ? GST_STATE_CODES[stateCode] : null,
+    billing_pincode: data.billingPincode || null,
     payment_terms_days: data.paymentTermsDays,
   });
 

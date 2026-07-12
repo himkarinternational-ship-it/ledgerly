@@ -3,11 +3,16 @@ import { postJournalEntry, type JournalLineInput } from "@/lib/accounting/journa
 
 /**
  * Posts the accounting entry for a finalized (non-draft) sales invoice:
- *   Dr Accounts Receivable         (total_amount)
+ *   Dr Accounts Receivable         (total_amount - tds_amount)
+ *   Dr TDS Receivable              (tds_amount, if the client deducts TDS)
  *     Cr Sales Income               (taxable_value)
  *     Cr Output CGST                (cgst_amount)
  *     Cr Output SGST                (sgst_amount)
  *     Cr Output IGST                (igst_amount)
+ *
+ * TDS Receivable represents tax the client has already deposited with the
+ * government on your behalf — it's an advance against your income tax
+ * liability, not money you're still owed by the client.
  *
  * Credit notes reverse the direction. Requires system accounts to already
  * exist in the chart of accounts (seeded by migration 0003).
@@ -27,6 +32,7 @@ export async function postInvoiceToJournal(
   if (invoice.journal_entry_id) return invoice.journal_entry_id; // already posted
 
   const receivableAccount = await getSystemAccount(supabase, tenantId, "1100");
+  const tdsReceivableAccount = await getSystemAccount(supabase, tenantId, "1300");
   const salesAccount = await getSystemAccount(supabase, tenantId, "4000");
   const outputCgst = await getSystemAccount(supabase, tenantId, "2100");
   const outputSgst = await getSystemAccount(supabase, tenantId, "2101");
@@ -34,13 +40,22 @@ export async function postInvoiceToJournal(
 
   const isCreditNote = invoice.invoice_type === "credit_note";
   const lines: JournalLineInput[] = [];
+  const tdsAmount = invoice.tds_amount ?? 0;
 
   if (!isCreditNote) {
+    const netReceivable = invoice.total_amount - tdsAmount;
     lines.push({
       accountId: receivableAccount.id,
-      debit: invoice.total_amount,
+      debit: netReceivable,
       description: `Invoice ${invoice.invoice_number}`,
     });
+    if (tdsAmount > 0) {
+      lines.push({
+        accountId: tdsReceivableAccount.id,
+        debit: tdsAmount,
+        description: `TDS ${invoice.tds_section ?? ""} on ${invoice.invoice_number}`,
+      });
+    }
     if (invoice.taxable_value > 0)
       lines.push({ accountId: salesAccount.id, credit: invoice.taxable_value });
     if (invoice.cgst_amount > 0)

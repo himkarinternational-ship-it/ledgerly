@@ -25,6 +25,7 @@ export function NewContactButton() {
         billingAddressLine1: (formData.get("billingAddressLine1") as string) || undefined,
         billingCity: (formData.get("billingCity") as string) || undefined,
         billingStateCode: (formData.get("billingStateCode") as string) || undefined,
+        billingPincode: (formData.get("billingPincode") as string) || undefined,
         paymentTermsDays: Number(formData.get("paymentTermsDays") || 30),
       });
       if (result?.error) setError(result.error);
@@ -106,9 +107,14 @@ export function NewContactButton() {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="paymentTermsDays">Payment Terms (days)</Label>
-                  <Input id="paymentTermsDays" name="paymentTermsDays" type="number" defaultValue="30" />
+                  <Label htmlFor="billingPincode">PIN Code</Label>
+                  <Input id="billingPincode" name="billingPincode" />
                 </div>
+              </div>
+
+              <div>
+                <Label htmlFor="paymentTermsDays">Payment Terms (days)</Label>
+                <Input id="paymentTermsDays" name="paymentTermsDays" type="number" defaultValue="30" className="w-32" />
               </div>
 
               {error && (

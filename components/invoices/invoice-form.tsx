@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GST_STATE_CODES } from "@/lib/gst/calculator";
 import { previewInvoiceTotals } from "@/lib/gst/preview";
 import { formatINR } from "@/lib/accounting/money";
-import { finalizeAndRedirect } from "@/app/(app)/invoices/actions";
+import { finalizeAndRedirect, updateAndRedirect } from "@/app/(app)/invoices/actions";
 import { cn } from "@/lib/utils/cn";
 import { TDS_SECTION_LIST } from "@/lib/gst/tds";
 
@@ -48,33 +48,61 @@ const emptyLine: LineItemRow = {
   gstRate: 18,
 };
 
+interface ExistingInvoiceData {
+  id: string;
+  invoiceType: "tax_invoice" | "bill_of_supply" | "export" | "proforma";
+  clientId: string;
+  issueDate: string;
+  dueDate: string;
+  placeOfSupplyStateCode: string;
+  notes: string;
+  bankAccountId: string;
+  tdsApplicable: boolean;
+  tdsSection: string;
+  lineItems: LineItemRow[];
+}
+
 export function InvoiceForm({
   tenantId,
   supplierStateCode,
   clients,
   bankAccounts,
+  existingInvoice,
 }: {
   tenantId: string;
   supplierStateCode: string | null;
   clients: ClientOption[];
   bankAccounts: BankAccountOption[];
+  existingInvoice?: ExistingInvoiceData;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [invoiceType, setInvoiceType] = useState<"tax_invoice" | "bill_of_supply" | "export" | "proforma">("tax_invoice");
-  const [clientId, setClientId] = useState("");
-  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [dueDate, setDueDate] = useState("");
-  const [placeOfSupplyStateCode, setPlaceOfSupplyStateCode] = useState("");
-  const [notes, setNotes] = useState("");
-  const [bankAccountId, setBankAccountId] = useState(
-    () => bankAccounts.find((b) => b.is_primary)?.id ?? bankAccounts[0]?.id ?? ""
+  const isEditMode = Boolean(existingInvoice);
+
+  const [invoiceType, setInvoiceType] = useState<"tax_invoice" | "bill_of_supply" | "export" | "proforma">(
+    existingInvoice?.invoiceType ?? "tax_invoice"
   );
-  const [tdsApplicable, setTdsApplicable] = useState(false);
-  const [tdsSection, setTdsSection] = useState("");
-  const [lines, setLines] = useState<LineItemRow[]>([{ ...emptyLine }]);
+  const [clientId, setClientId] = useState(existingInvoice?.clientId ?? "");
+  const [issueDate, setIssueDate] = useState(
+    () => existingInvoice?.issueDate ?? new Date().toISOString().slice(0, 10)
+  );
+  const [dueDate, setDueDate] = useState(existingInvoice?.dueDate ?? "");
+  const [placeOfSupplyStateCode, setPlaceOfSupplyStateCode] = useState(
+    existingInvoice?.placeOfSupplyStateCode ?? ""
+  );
+  const [notes, setNotes] = useState(existingInvoice?.notes ?? "");
+  const [bankAccountId, setBankAccountId] = useState(
+    () => existingInvoice?.bankAccountId ?? bankAccounts.find((b) => b.is_primary)?.id ?? bankAccounts[0]?.id ?? ""
+  );
+  const [tdsApplicable, setTdsApplicable] = useState(existingInvoice?.tdsApplicable ?? false);
+  const [tdsSection, setTdsSection] = useState(existingInvoice?.tdsSection ?? "");
+  const [lines, setLines] = useState<LineItemRow[]>(
+    existingInvoice?.lineItems && existingInvoice.lineItems.length > 0
+      ? existingInvoice.lineItems
+      : [{ ...emptyLine }]
+  );
 
   const selectedClient = clients.find((c) => c.id === clientId);
 
@@ -125,7 +153,7 @@ export function InvoiceForm({
     }
 
     startTransition(async () => {
-      const result = await finalizeAndRedirect({
+      const payload = {
         tenantId,
         invoiceType,
         clientId,
@@ -147,7 +175,12 @@ export function InvoiceForm({
           gstRate: l.gstRate,
         })),
         status,
-      });
+      };
+
+      const result = isEditMode
+        ? await updateAndRedirect(existingInvoice!.id, payload)
+        : await finalizeAndRedirect(payload);
+
       if (result?.error) {
         setError(result.error);
       }
@@ -406,10 +439,10 @@ export function InvoiceForm({
 
             <div className="flex flex-col gap-2 pt-3">
               <Button onClick={() => handleSubmit("sent")} disabled={isPending}>
-                {isPending ? "Saving…" : "Save & Finalize"}
+                {isPending ? "Saving…" : isEditMode ? "Finalize Invoice" : "Save & Finalize"}
               </Button>
               <Button variant="outline" onClick={() => handleSubmit("draft")} disabled={isPending}>
-                Save as Draft
+                {isEditMode ? "Save Draft" : "Save as Draft"}
               </Button>
               <Button variant="ghost" type="button" onClick={() => router.back()} disabled={isPending}>
                 Cancel

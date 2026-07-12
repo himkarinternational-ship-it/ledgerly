@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
+import { idSchema } from "@/lib/utils/validation";
 
 const accountSchema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: idSchema,
   code: z.string().min(1).max(10),
   name: z.string().min(1).max(200),
   accountType: z.enum(["asset", "liability", "equity", "income", "expense"]),
@@ -51,3 +52,4 @@ export async function createAccount(formData: FormData) {
   revalidatePath("/accounts");
   return { success: true };
 }
+

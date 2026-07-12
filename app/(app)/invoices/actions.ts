@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { idSchema } from "@/lib/utils/validation";
 import { createClient } from "@/lib/supabase/server";
 import { calculateInvoiceTotals, determineSupplyType, calculateLineItemGst } from "@/lib/gst/calculator";
 import { postInvoiceToJournal } from "@/lib/accounting/postInvoice";
@@ -19,9 +20,9 @@ const lineItemSchema = z.object({
 });
 
 const invoiceSchema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: idSchema,
   invoiceType: z.enum(["tax_invoice", "bill_of_supply", "export", "proforma", "credit_note", "debit_note"]),
-  clientId: z.string().uuid(),
+  clientId: idSchema,
   issueDate: z.string(),
   dueDate: z.string().optional(),
   placeOfSupplyState: z.string(),
@@ -161,3 +162,4 @@ export async function finalizeAndRedirect(payload: InvoiceFormPayload) {
   }
   return result;
 }
+

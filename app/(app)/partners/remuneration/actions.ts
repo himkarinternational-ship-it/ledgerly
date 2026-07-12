@@ -1,10 +1,11 @@
 "use server";
 
 import { z } from "zod";
+import { idSchema } from "@/lib/utils/validation";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: idSchema,
   financialYear: z.string().min(1),
   netProfitAsPerPL: z.number(),
   addBackRemuneration: z.number(),
@@ -39,3 +40,4 @@ export async function saveRemunerationCalculation(payload: z.infer<typeof schema
   if (error) return { error: error.message };
   return { success: true };
 }
+

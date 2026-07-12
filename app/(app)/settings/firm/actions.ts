@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { idSchema } from "@/lib/utils/validation";
 import { createClient } from "@/lib/supabase/server";
 import { isValidGstinFormat } from "@/lib/gst/calculator";
 
 const firmSchema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: idSchema,
   name: z.string().min(1),
   gstin: z.string().optional(),
   pan: z.string().optional(),
@@ -48,3 +49,4 @@ export async function updateFirmProfile(payload: z.infer<typeof firmSchema>) {
   revalidatePath("/settings/firm");
   return { success: true };
 }
+

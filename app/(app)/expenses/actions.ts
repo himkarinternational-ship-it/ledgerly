@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { idSchema } from "@/lib/utils/validation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenant } from "@/lib/tenant";
 import { postExpenseToJournal } from "@/lib/accounting/postInvoice";
@@ -17,8 +18,8 @@ const TDS_SECTIONS: Record<string, number> = {
 };
 
 const expenseSchema = z.object({
-  vendorId: z.string().uuid().optional(),
-  categoryAccountId: z.string().uuid(),
+  vendorId: idSchema.optional(),
+  categoryAccountId: idSchema,
   date: z.string(),
   amount: z.coerce.number().positive(),
   gstRate: z.coerce.number().min(0).max(28).default(0),
@@ -27,7 +28,7 @@ const expenseSchema = z.object({
   tdsApplicable: z.coerce.boolean().default(false),
   tdsSection: z.string().optional(),
   paymentMode: z.enum(["bank", "cash", "upi", "card", "cheque", "other"]).default("bank"),
-  bankAccountId: z.string().uuid().optional(),
+  bankAccountId: idSchema.optional(),
   description: z.string().optional(),
   status: z.enum(["draft", "recorded", "paid"]).default("recorded"),
 });
@@ -100,3 +101,4 @@ export async function createExpense(payload: z.infer<typeof expenseSchema>) {
   revalidatePath("/dashboard");
   return { success: true };
 }
+

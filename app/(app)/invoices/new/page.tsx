@@ -9,7 +9,7 @@ export default async function NewInvoicePage() {
   const supabase = await createClient();
   const tenant = await getCurrentTenant();
 
-  const [{ data: clients }, { data: tenantRow }] = await Promise.all([
+  const [{ data: clients }, { data: tenantRow }, { data: bankAccounts }] = await Promise.all([
     supabase
       .from("contacts")
       .select("id, name, gstin, billing_state, billing_state_code")
@@ -18,6 +18,12 @@ export default async function NewInvoicePage() {
       .eq("is_active", true)
       .order("name"),
     supabase.from("tenants").select("state_code").eq("id", tenant.id).single(),
+    supabase
+      .from("bank_accounts")
+      .select("id, bank_name, account_number, is_primary")
+      .eq("tenant_id", tenant.id)
+      .eq("is_active", true)
+      .order("is_primary", { ascending: false }),
   ]);
 
   return (
@@ -36,7 +42,12 @@ export default async function NewInvoicePage() {
             You don&apos;t have any clients yet. Add clients in Settings → Clients first, then come back.
           </div>
         )}
-        <InvoiceForm tenantId={tenant.id} supplierStateCode={tenantRow?.state_code ?? null} clients={clients ?? []} />
+        <InvoiceForm
+          tenantId={tenant.id}
+          supplierStateCode={tenantRow?.state_code ?? null}
+          clients={clients ?? []}
+          bankAccounts={bankAccounts ?? []}
+        />
       </main>
     </>
   );

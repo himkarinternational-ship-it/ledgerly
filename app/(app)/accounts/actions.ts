@@ -52,4 +52,3 @@ export async function createAccount(formData: FormData) {
   revalidatePath("/accounts");
   return { success: true };
 }
-

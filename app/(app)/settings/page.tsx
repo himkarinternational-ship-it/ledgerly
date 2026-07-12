@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Building2, Users, ArrowRight } from "lucide-react";
+import { Building2, Users, Landmark, ArrowRight } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 
 const settingsLinks = [
-  { href: "/settings/firm", label: "Firm Profile", description: "GSTIN, PAN, TAN, address, financial year", icon: Building2 },
+  { href: "/settings/firm", label: "Firm Profile", description: "GSTIN, PAN, TAN, address, logo, signature", icon: Building2 },
+  { href: "/settings/bank-accounts", label: "Bank Accounts", description: "Accounts shown on invoices for payment", icon: Landmark },
   { href: "/settings/clients", label: "Clients & Vendors", description: "Manage contacts used in invoices and expenses", icon: Users },
 ];
 

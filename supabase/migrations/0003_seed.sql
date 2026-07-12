@@ -12,15 +12,15 @@ insert into tenants (
   'Himkar International',
   'himkar-international',
   'partnership',
-  'AARFH7024E',
+  'REPLACE_WITH_PAN',
   'REPLACE_WITH_GSTIN',
   'REPLACE_WITH_TAN',
   'UDYAM-RJ-33-0098000',
-  ',PLOT NO.C-2/122, GALLI NO.-1, SANTOSH NAGAR,GARIYAWAS',
-  'UDAIPUR',
-  'RAJASTHAN',
+  'REPLACE_WITH_ADDRESS',
+  'REPLACE_WITH_CITY',
+  'Rajasthan',
   '08',
-  '313001',
+  'REPLACE_WITH_PINCODE',
   4
 )
 on conflict (id) do nothing;
